@@ -54,7 +54,7 @@ app.post('/api/gerar-dou', async (req: Request, res: Response) => {
 
     // Etapa 1: Upload para o repositório da Meta
     const formData = new FormData();
-    formData.append('file', rtfBuffer, { filename: 'gabarito_dou.rtf', contentType: 'application/rtf' });
+    formData.append('file', rtfBuffer, { filename: 'gabarito_dou.rtf', contentType: 'text/plain' });
     formData.append('messaging_product', 'whatsapp');
 
     const uploadRes = await axios.post(
