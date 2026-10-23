@@ -6,6 +6,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const dataAtual = new Date();
+    const formatador = new Intl.DateTimeFormat('pt-BR', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'America/Sao_Paulo'
+    });
+    const dataEmissaoAutomatica = formatador.format(dataAtual);
+
 // Função auxiliar para codificar acentos no padrão exigido pelo formato RTF
 function encodeRTF(str: string) {
   if (!str) return '';
@@ -32,7 +41,7 @@ ${blocosCursos}
 \\par
 \\pard\\qj A rela\\'e7\\'e3o dos diplomas registrados poder\\'e1 ser consultada no endere\\'e7o: ${encodeRTF(dados.site)}.\\par
 \\par
-\\pard\\qr ${encodeRTF(dados.cidade)} - ${encodeRTF(dados.uf)}, ${encodeRTF(dados.dataEmissao)}.\\par
+\\pard\\qr ${encodeRTF(dados.cidade)} - ${encodeRTF(dados.uf)}, ${encodeRTF(dataEmissaoAutomatica)}.\\par
 \\par\\par
 \\pard\\qc\\b ${encodeRTF(dados.assinatura)}\\b0\\par
 ${encodeRTF(dados.cargo)}\\par
