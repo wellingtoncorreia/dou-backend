@@ -6,50 +6,59 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const dataAtual = new Date();
-    const formatador = new Intl.DateTimeFormat('pt-BR', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-      timeZone: 'America/Sao_Paulo'
-    });
-    const dataEmissaoAutomatica = formatador.format(dataAtual);
-
-// Função auxiliar para codificar acentos no padrão exigido pelo formato RTF
+// 1. Função para codificar acentos no padrão exigido pelo formato RTF
 function encodeRTF(str: string) {
   if (!str) return '';
   return str.replace(/[^\x00-\x7F]/g, char => `\\'${char.charCodeAt(0).toString(16).toLowerCase()}`);
+}
+
+// 2. Função para remover múltiplos espaços (Regra obrigatória do INCom/DOU)
+function limparEspacos(str: string) {
+  if (!str) return '';
+  return str.replace(/\s+/g, ' ').trim();
 }
 
 app.post('/api/gerar-dou', async (req, res) => {
   try {
     const dados = req.body;
     
-    // 1. Gera dinamicamente o texto de todos os cursos preenchidos
-    const blocosCursos = dados.cursos.map((c: any) => {
-      return `\\par \\b Curso ${encodeRTF(c.nome)}:\\b0  no per\\'edodo de ${encodeRTF(c.dataInicio)} a ${encodeRTF(c.dataFim)} nos seguintes livros de registro e sequ\\'eancias num\\'e9ricas: ${encodeRTF(c.registros)}.\\par`;
-    }).join('\\par ');
+    // Gera a data atual por extenso em português (fuso de São Paulo)
+    const dataAtual = new Date();
+    const formatador = new Intl.DateTimeFormat('pt-BR', {
+      day: '2-digit', month: 'long', year: 'numeric', timeZone: 'America/Sao_Paulo'
+    });
+    const dataEmissaoAutomatica = formatador.format(dataAtual); // Ex: "23 de outubro de 2026"
 
-    // 2. Constrói a estrutura nativa do RTF baseada no seu modelo (GABARITO EDF Bach)
+    // Monta a string dos cursos de forma contínua (SEM quebras de linha)
+    const blocosCursos = dados.cursos.map((c: any) => {
+      return `do Curso de ${c.nome}, no período de ${c.dataInicio} a ${c.dataFim} nos seguintes livros de registro e sequências numéricas: ${c.registros}`;
+    }).join('; e ');
+
+    // Constrói o texto corrido do ##TEX
+    let textoTex = `A ${dados.mantenedora}, sob CNPJ ${dados.cnpj}, mantenedora da ${dados.ies}, para fins do disposto do art. 21 da Portaria MEC nº 1.095 de 25 de outubro de 2018, informa que foram registrados os seguintes documentos ${blocosCursos}. A relação dos diplomas registrados poderá ser consultada no endereço: ${dados.site}.`;
+    
+    // Aplica a limpeza de espaços duplos
+    textoTex = limparEspacos(textoTex);
+    const localEData = limparEspacos(`${dados.cidade} - ${dados.uf}, ${dataEmissaoAutomatica}.`);
+    const assinatura = limparEspacos(dados.assinatura);
+    const cargo = limparEspacos(dados.cargo);
+
+    // Constrói o RTF final seguindo ESTRITAMENTE as regras do INCom (DOU)
+    // \fs18 = Calibri tamanho 9
+    // Sem linhas em branco (\par soltos) entre os marcadores ou no fim
     const conteudoRtf = `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat{\\fonttbl{\\f0\\fnil\\fcharset0 Calibri;}}
-{\\*\\generator Node.js RTF Builder;}\\viewkind4\\uc1
-\\pard\\sa200\\sl276\\slmult1\\f0\\fs22\\lang22
-\\qc\\b ATO REGISTRO DE DIPLOMAS\\b0\\par
-\\pard\\qj A \\b ${encodeRTF(dados.mantenedora)}\\b0 , sob CNPJ ${encodeRTF(dados.cnpj)}, mantenedora da \\b ${encodeRTF(dados.ies)}\\b0 , para fins do disposto do art. 21 da Portaria MEC n\\'b0 1.095 de 25 de outubro de 2018, informa que foram registrados os seguintes documentos:\\par
-\\par
-${blocosCursos}
-\\par
-\\pard\\qj A rela\\'e7\\'e3o dos diplomas registrados poder\\'e1 ser consultada no endere\\'e7o: ${encodeRTF(dados.site)}.\\par
-\\par
-\\pard\\qr ${encodeRTF(dados.cidade)} - ${encodeRTF(dados.uf)}, ${encodeRTF(dataEmissaoAutomatica)}.\\par
-\\par\\par
-\\pard\\qc\\b ${encodeRTF(dados.assinatura)}\\b0\\par
-${encodeRTF(dados.cargo)}\\par
-}`;
+{\\*\\generator Node.js RTF Builder;}\\viewkind4\\uc1\\pard\\f0\\fs18\\lang1046
+##ATO REGISTRO DE DIPLOMAS\\par
+##TEX ${encodeRTF(textoTex)}\\par
+##DAT ${encodeRTF(localEData)}\\par
+##ASS ${encodeRTF(assinatura)}\\par
+##CAR ${encodeRTF(cargo)}
+}`; 
+    // Repare que o fechamento "}" fica colado logo após o cargo, sem \par final!
 
     const rtfBuffer = Buffer.from(conteudoRtf, 'utf-8');
 
-    // 3. Dispara por E-mail via Nodemailer
+    // Dispara por E-mail via Nodemailer
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -61,11 +70,11 @@ ${encodeRTF(dados.cargo)}\\par
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: process.env.EMAIL_USER,
-      subject: '📄 Novo Arquivo DOU - Múltiplos Cursos',
-      text: 'O documento RTF foi gerado com sucesso e encontra-se em anexo.',
+      subject: '📄 Novo Arquivo DOU - Formato INCom',
+      text: 'O documento RTF formatado para o INCom/DOU foi gerado com sucesso.',
       attachments: [
         {
-          filename: 'gabarito_dou.rtf',
+          filename: 'gabarito_dou_incom.rtf',
           content: rtfBuffer 
         }
       ]
