@@ -10,7 +10,25 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const { WHATSAPP_TOKEN, PHONE_NUMBER_ID, TARGET_NUMBER, PORT } = process.env;
+const { WHATSAPP_TOKEN, PHONE_NUMBER_ID, TARGET_NUMBER, PORT, VERIFY_TOKEN } = process.env;
+
+// A rota virtual do Webhook
+app.get('/webhook', (req: Request, res: Response) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode && token) {
+    // Agora ele compara com a variável de ambiente
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('Webhook verificado com sucesso!');
+      res.status(200).send(challenge);
+    } else {
+      res.sendStatus(403);
+    }
+  }
+});
+
 
 app.post('/api/gerar-dou', async (req: Request, res: Response) => {
   const { mantenedora, cnpj, ies, dataInicio, dataFim, registros, site, cidade, uf, dataEmissao, assinatura, cargo } = req.body;
