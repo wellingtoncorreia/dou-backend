@@ -42,8 +42,8 @@ app.post('/api/gerar-dou', async (req: Request, res: Response) => {
 
     // Aplica as Regex de limpeza de espaços inquebráveis e caracteres invisíveis
     textoBase = textoBase.replace(/[\uF000-\uF8FF\u200B-\u200D]/g, '')
-                         .replace(/[\xA0\t]/g, ' ')
-                         .replace(/ {2,}/g, ' ');
+      .replace(/[\xA0\t]/g, ' ')
+      .replace(/ {2,}/g, ' ');
 
     // Estrutura padrão RTF exigida pela Imprensa Nacional (Calibri, fs18)
     const rtfContent = `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat{\\fonttbl{\\f0\\fnil\\fcharset0 Calibri;}}
@@ -79,8 +79,15 @@ app.post('/api/gerar-dou', async (req: Request, res: Response) => {
 
     res.status(200).json({ message: 'Arquivo gerado e enviado com sucesso!' });
   } catch (error: any) {
-    console.error('Erro na API do WhatsApp:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Erro na integração com WhatsApp' });
+    // Captura a mensagem de recusa exata enviada pela Meta
+    const detalhesErro = error.response?.data || error.message;
+    console.error('Erro na API do WhatsApp:', detalhesErro);
+
+    // Devolve o erro detalhado para o frontend (Angular)
+    res.status(500).json({
+      error: 'Erro na integração com WhatsApp',
+      detalhes: detalhesErro
+    });
   }
 });
 
