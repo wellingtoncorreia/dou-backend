@@ -1,95 +1,71 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
 import cors from 'cors';
-import axios from 'axios';
-import FormData from 'form-data';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import nodemailer from 'nodemailer';
 
 const app = express();
+
+// Configurações básicas
 app.use(cors());
 app.use(express.json());
 
-const { WHATSAPP_TOKEN, PHONE_NUMBER_ID, TARGET_NUMBER, PORT, VERIFY_TOKEN } = process.env;
-
-// A rota virtual do Webhook
-app.get('/webhook', (req: Request, res: Response) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  if (mode && token) {
-    // Agora ele compara com a variável de ambiente
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('Webhook verificado com sucesso!');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
-  }
-});
-
-
-app.post('/api/gerar-dou', async (req: Request, res: Response) => {
-  const { mantenedora, cnpj, ies, dataInicio, dataFim, registros, site, cidade, uf, dataEmissao, assinatura, cargo } = req.body;
-
+app.post('/api/gerar-dou', async (req, res) => {
   try {
-    let textoBase = `##ATO REGISTRO DE DIPLOMAS
-##TEX A ${mantenedora} sob CNPJ ${cnpj}, mantenedora das ${ies}, para fins do disposto do art. 21 da Portaria MEC n° 1.095 de 25 de outubro de 2018, informa que foram registrados no período de ${dataInicio} a ${dataFim} nos seguintes livros de registro e sequências numéricas ${registros}. A relação dos diplomas registrados poderá ser consultada no endereço: ${site}.
-##DAT ${cidade} ${uf}, de ${dataEmissao}.
-##ASS ${assinatura}
-##CAR ${cargo}.`;
+    // 1. Recebe os dados do formulário Angular
+    const dados = req.body;
 
-    // Aplica as Regex de limpeza de espaços inquebráveis e caracteres invisíveis
-    textoBase = textoBase.replace(/[\uF000-\uF8FF\u200B-\u200D]/g, '')
-      .replace(/[\xA0\t]/g, ' ')
-      .replace(/ {2,}/g, ' ');
+    // 2. Geração do Buffer do arquivo RTF (adapte com a sua lógica real de criação do RTF)
+    const conteudoRtf = `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat{\\fonttbl{\\f0\\fnil\\fcharset0 Calibri;}}\n{\\*\\generator Riched20 10.0.19041}\\viewkind4\\uc1\n\\pard\\sa200\\sl276\\slmult1\\f0\\fs22\\lang22 Ol\\'e1, este \\'e9 o documento DOU!\\par}\n`;
+    const rtfBuffer = Buffer.from(conteudoRtf, 'utf-8');
 
-    // Estrutura padrão RTF exigida pela Imprensa Nacional (Calibri, fs18)
-    const rtfContent = `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat{\\fonttbl{\\f0\\fnil\\fcharset0 Calibri;}}
-{\\*\\generator Node.js;}\\viewkind4\\uc1 
-\\pard\\f0\\fs18 ${textoBase.replace(/\n/g, '\\par\\pard\n')}\\par
-}`;
-    const rtfBuffer = Buffer.from(rtfContent, 'utf-8');
+    // =========================================================
+    // INTEGRAÇÃO COM NODEMAILER (GMAIL)
+    // =========================================================
+    const EMAIL_USER = process.env.EMAIL_USER;
+    const EMAIL_PASS = process.env.EMAIL_PASS;
 
-    // Etapa 1: Upload para o repositório da Meta
-    const formData = new FormData();
-    formData.append('file', rtfBuffer, { filename: 'gabarito_dou.rtf', contentType: 'text/plain' });
-    formData.append('messaging_product', 'whatsapp');
+    if (!EMAIL_USER || !EMAIL_PASS) {
+      throw new Error('Faltam variáveis de ambiente do E-mail.');
+    }
 
-    const uploadRes = await axios.post(
-      `https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/media`,
-      formData,
-      { headers: { ...formData.getHeaders(), Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
-    );
+    // Configura a conexão com o Gmail da Borsato Hub
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASS
+      }
+    });
 
-    const mediaId = uploadRes.data.id;
+    // Monta o e-mail com o arquivo em anexo
+    const mailOptions = {
+      from: EMAIL_USER,
+      to: EMAIL_USER, // Envia para a sua própria caixa de entrada
+      subject: '📄 Novo Arquivo DOU Gerado',
+      text: 'O documento RTF foi gerado com sucesso pelo sistema Angular e encontra-se em anexo.',
+      attachments: [
+        {
+          filename: 'gabarito_dou.rtf',
+          content: rtfBuffer 
+        }
+      ]
+    };
 
-    // Etapa 2: Envio para o número de destino
-    await axios.post(
-      `https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to: TARGET_NUMBER,
-        type: 'document',
-        document: { id: mediaId, filename: 'gabarito_dou.rtf', caption: 'Arquivo DOU Formatado' }
-      },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' } }
-    );
+    // Dispara o e-mail
+    await transporter.sendMail(mailOptions);
+    
+    console.log('E-mail enviado com sucesso!');
+    return res.status(200).json({ message: 'Arquivo gerado e enviado por e-mail com sucesso!' });
 
-    res.status(200).json({ message: 'Arquivo gerado e enviado com sucesso!' });
   } catch (error: any) {
-    // Captura a mensagem de recusa exata enviada pela Meta
-    const detalhesErro = error.response?.data || error.message;
-    console.error('Erro na API do WhatsApp:', detalhesErro);
-
-    // Devolve o erro detalhado para o frontend (Angular)
-    res.status(500).json({
-      error: 'Erro na integração com WhatsApp',
-      detalhes: detalhesErro
+    console.error('Erro no processamento do e-mail:', error);
+    return res.status(500).json({ 
+      error: 'Erro na geração ou envio do e-mail',
+      detalhes: error.message 
     });
   }
 });
 
-const serverPort = PORT || 3000;
-app.listen(serverPort, () => console.log(`Servidor rodando na porta ${serverPort}`));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
